@@ -59,6 +59,8 @@ pub fn import_midi_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<Projec
             }
         };
 
+        let clip_name = display_name.clone();
+
         let mut t = Track {
             id: new_id(),
             name: display_name,
@@ -82,7 +84,7 @@ pub fn import_midi_bytes(bytes: &[u8], name_hint: Option<&str>) -> Result<Projec
 
         let clip = Clip {
             id: new_id(),
-            name: "Imported".to_owned(),
+            name: clip_name,
             start_beat: 0.0,
             length_beats: clip_len,
             notes,

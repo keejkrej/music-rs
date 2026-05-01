@@ -323,9 +323,25 @@ impl DawApp {
 
     fn central_panel(&mut self, ui: &mut egui::Ui) {
         self.sync_transport_from_audio();
-        self.timeline(ui);
-        ui.separator();
-        self.piano_roll(ui);
+        let width = ui.available_width();
+        let total_h = ui.available_height();
+        let sep = 4.0_f32;
+        let top_h = ((total_h - sep) * 0.5).max(48.0);
+        let bottom_h = (total_h - sep - top_h).max(48.0);
+
+        ui.vertical(|ui| {
+            ui.allocate_ui_with_layout(
+                Vec2::new(width, top_h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| self.timeline(ui, top_h),
+            );
+            ui.add_space(sep);
+            ui.allocate_ui_with_layout(
+                Vec2::new(width, bottom_h),
+                egui::Layout::top_down(egui::Align::Min),
+                |ui| self.piano_roll(ui, bottom_h),
+            );
+        });
     }
 
     fn sync_transport_from_audio(&mut self) {
@@ -358,20 +374,26 @@ impl DawApp {
         }
     }
 
-    fn timeline(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Timeline");
-        let loop_start = self.project.loop_start_beat();
-        let loop_len = self.project.loop_length_beats().max(1.0);
-        let content_width = (loop_len * TIMELINE_PX_PER_BEAT).max(ui.available_width());
-        let track_rows = self.project.tracks.len().max(1) as f32;
-        let tracks_h = 8.0 + track_rows * (TIMELINE_ROW_H + TIMELINE_ROW_GAP);
-        let inner_h = TIMELINE_RULER_H + tracks_h;
-        let outer_h = inner_h.min(220.0).max(120.0);
+    fn timeline(&mut self, ui: &mut egui::Ui, panel_h: f32) {
+        ui.set_min_height(panel_h);
+        ui.set_max_height(panel_h);
+        ui.vertical(|ui| {
+            ui.heading("Timeline");
+            let inner_h = ui.available_height().max(24.0);
+            let loop_start = self.project.loop_start_beat();
+            let loop_len = self.project.loop_length_beats().max(1.0);
+            let viewport_w = ui.available_width();
+            let content_width = (loop_len * TIMELINE_PX_PER_BEAT).max(viewport_w);
+            let track_rows = self.project.tracks.len().max(1) as f32;
+            let tracks_h = 8.0 + track_rows * (TIMELINE_ROW_H + TIMELINE_ROW_GAP);
+            let content_h = TIMELINE_RULER_H + tracks_h;
 
-        egui::ScrollArea::horizontal()
-            .id_salt("timeline_hscroll")
-            .show(ui, |ui| {
-                let desired = Vec2::new(content_width, outer_h);
+            egui::ScrollArea::both()
+                .id_salt("timeline_scroll")
+                .max_width(viewport_w)
+                .max_height(inner_h)
+                .show(ui, |ui| {
+                let desired = Vec2::new(content_width, content_h);
                 let (outer_rect, outer_response) =
                     ui.allocate_exact_size(desired, Sense::click_and_drag());
                 let painter = ui.painter_at(outer_rect);
@@ -452,9 +474,6 @@ impl DawApp {
                     let y = tracks_rect.top()
                         + 6.0
                         + row as f32 * (TIMELINE_ROW_H + TIMELINE_ROW_GAP);
-                    if y + TIMELINE_ROW_H > tracks_rect.bottom() {
-                        break;
-                    }
                     let track_audible = !track.mute && (!solo_active || track.solo);
                     let row_rect = Rect::from_min_size(
                         Pos2::new(tracks_rect.left(), y),
@@ -597,262 +616,280 @@ impl DawApp {
                     }
                 }
             });
+        });
     }
 
-    fn piano_roll(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Piano Roll");
-        let Some((track_id, clip_id, clip)) = self.selected_clip_data() else {
-            ui.label("Select a clip");
-            return;
-        };
+    fn piano_roll(&mut self, ui: &mut egui::Ui, panel_h: f32) {
+        ui.set_min_height(panel_h);
+        ui.set_max_height(panel_h);
+        ui.vertical(|ui| {
+            ui.heading("Piano Roll");
+            match self.selected_clip_data() {
+                None => {
+                    let inner_h = ui.available_height().max(24.0);
+                    egui::ScrollArea::vertical()
+                        .id_salt("piano_roll_empty_scroll")
+                        .max_height(inner_h)
+                        .show(ui, |ui| {
+                            ui.label("Select a clip");
+                        });
+                }
+                Some((track_id, clip_id, clip)) => {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(format!("{} notes", clip.notes.len()));
+                        ui.label(format!("Pitch {}", midi_note_name(self.draft_pitch)));
+                        ui.add(egui::DragValue::new(&mut self.draft_pitch).range(0..=127));
+                        ui.label("Start");
+                        ui.add(
+                            egui::DragValue::new(&mut self.draft_start)
+                                .range(0.0..=clip.length_beats)
+                                .speed(0.25),
+                        );
+                        ui.label("Length");
+                        ui.add(
+                            egui::DragValue::new(&mut self.draft_len)
+                                .range(0.05..=4.0)
+                                .speed(0.1),
+                        );
+                        ui.label("Velocity");
+                        ui.add(
+                            egui::DragValue::new(&mut self.draft_velocity)
+                                .range(0.0..=1.0)
+                                .speed(0.05),
+                        );
+                        if ui.button("Add Note").clicked() {
+                            let note = MidiNote {
+                                pitch: self.draft_pitch,
+                                velocity: self.draft_velocity,
+                                start_beat: self.draft_start,
+                                length_beats: self.draft_len,
+                            };
+                            let _ = self.edit_project(|project| {
+                                apply_commands(
+                                    project,
+                                    vec![EditCommand::AddNotes {
+                                        track_id: track_id.clone(),
+                                        clip_id: Some(clip_id.clone()),
+                                        notes: vec![note],
+                                    }],
+                                )
+                            });
+                        }
+                        if ui.button("Delete Last").clicked() {
+                            let _ = self.edit_project(|project| {
+                                let track = project
+                                    .track_mut(&track_id)
+                                    .context("selected track no longer exists")?;
+                                let clip = track
+                                    .clips
+                                    .iter_mut()
+                                    .find(|clip| clip.id == clip_id)
+                                    .context("selected clip no longer exists")?;
+                                clip.notes.pop();
+                                Ok(())
+                            });
+                        }
+                    });
 
-        ui.horizontal_wrapped(|ui| {
-            ui.label(format!("{} notes", clip.notes.len()));
-            ui.label(format!("Pitch {}", midi_note_name(self.draft_pitch)));
-            ui.add(egui::DragValue::new(&mut self.draft_pitch).range(0..=127));
-            ui.label("Start");
-            ui.add(
-                egui::DragValue::new(&mut self.draft_start)
-                    .range(0.0..=clip.length_beats)
-                    .speed(0.25),
-            );
-            ui.label("Length");
-            ui.add(
-                egui::DragValue::new(&mut self.draft_len)
-                    .range(0.05..=4.0)
-                    .speed(0.1),
-            );
-            ui.label("Velocity");
-            ui.add(
-                egui::DragValue::new(&mut self.draft_velocity)
-                    .range(0.0..=1.0)
-                    .speed(0.05),
-            );
-            if ui.button("Add Note").clicked() {
-                let note = MidiNote {
-                    pitch: self.draft_pitch,
-                    velocity: self.draft_velocity,
-                    start_beat: self.draft_start,
-                    length_beats: self.draft_len,
-                };
-                let _ = self.edit_project(|project| {
-                    apply_commands(
-                        project,
-                        vec![EditCommand::AddNotes {
-                            track_id: track_id.clone(),
-                            clip_id: Some(clip_id.clone()),
-                            notes: vec![note],
-                        }],
-                    )
-                });
-            }
-            if ui.button("Delete Last").clicked() {
-                let _ = self.edit_project(|project| {
-                    let track = project
-                        .track_mut(&track_id)
-                        .context("selected track no longer exists")?;
-                    let clip = track
-                        .clips
-                        .iter_mut()
-                        .find(|clip| clip.id == clip_id)
-                        .context("selected clip no longer exists")?;
-                    clip.notes.pop();
-                    Ok(())
-                });
-            }
-        });
-
-        let clip_len = clip.length_beats.max(1.0);
-        let grid_content_w = (clip_len * TIMELINE_PX_PER_BEAT).max(480.0);
-        let grid_body_h = 280.0;
-        let total_h = PIANO_RULER_H + grid_body_h;
-
-        egui::ScrollArea::horizontal()
-            .id_salt("piano_roll_scroll")
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    let (keys_rect, _) = ui.allocate_exact_size(
-                        Vec2::new(PIANO_KEYS_W, total_h),
-                        Sense::hover(),
-                    );
-                    let keys_painter = ui.painter_at(keys_rect);
-                    keys_painter.rect_filled(keys_rect, 2.0, Color32::from_rgb(26, 28, 32));
-                    keys_painter.line_segment(
-                        [
-                            Pos2::new(keys_rect.right(), keys_rect.top()),
-                            Pos2::new(keys_rect.right(), keys_rect.bottom()),
-                        ],
-                        Stroke::new(1.0, Color32::from_rgb(55, 58, 65)),
-                    );
-
+                    let inner_h = ui.available_height().max(24.0);
+                    let viewport_w = ui.available_width();
+                    let clip_len = clip.length_beats.max(1.0);
+                    let grid_content_w =
+                        (clip_len * TIMELINE_PX_PER_BEAT).max(viewport_w - PIANO_KEYS_W);
                     let pitch_min = 36_u8;
                     let pitch_max = 84_u8;
                     let pitch_span = (pitch_max - pitch_min) as f32;
-                    let row_h = grid_body_h / pitch_span;
+                    let grid_body_h = (pitch_span * 7.0_f32).max(160.0);
+                    let total_h = PIANO_RULER_H + grid_body_h;
 
-                    let ruler_keys = Rect::from_min_size(
-                        keys_rect.min,
-                        Vec2::new(keys_rect.width(), PIANO_RULER_H),
-                    );
-                    keys_painter.rect_filled(ruler_keys, 0.0, Color32::from_rgb(32, 34, 40));
+                    egui::ScrollArea::both()
+                        .id_salt("piano_roll_scroll")
+                        .max_width(viewport_w)
+                        .max_height(inner_h)
+                        .show(ui, |ui| {
+                            ui.horizontal_top(|ui| {
+                                let (keys_rect, _) = ui.allocate_exact_size(
+                                    Vec2::new(PIANO_KEYS_W, total_h),
+                                    Sense::hover(),
+                                );
+                                let keys_painter = ui.painter_at(keys_rect);
+                                keys_painter.rect_filled(keys_rect, 2.0, Color32::from_rgb(26, 28, 32));
+                                keys_painter.line_segment(
+                                    [
+                                        Pos2::new(keys_rect.right(), keys_rect.top()),
+                                        Pos2::new(keys_rect.right(), keys_rect.bottom()),
+                                    ],
+                                    Stroke::new(1.0, Color32::from_rgb(55, 58, 65)),
+                                );
 
-                    for p in pitch_min..=pitch_max {
-                        let row_from_bottom = (p - pitch_min) as f32;
-                        let y_cell_bottom = keys_rect.bottom() - row_from_bottom * row_h;
-                        let y_cell_top = y_cell_bottom - row_h;
-                        let cell = Rect::from_min_max(
-                            Pos2::new(keys_rect.left(), y_cell_top),
-                            Pos2::new(keys_rect.right(), y_cell_bottom),
-                        );
-                        let black = matches!(p % 12, 1 | 3 | 6 | 8 | 10);
-                        if black {
-                            keys_painter.rect_filled(cell, 0.0, Color32::from_rgb(34, 36, 40));
-                        }
-                        keys_painter.text(
-                            cell.left_center() + Vec2::new(4.0, 0.0),
-                            egui::Align2::LEFT_CENTER,
-                            midi_note_name(p),
-                            egui::TextStyle::Small.resolve(ui.style()),
-                            if black {
-                                Color32::from_rgb(190, 195, 205)
-                            } else {
-                                Color32::from_rgb(215, 218, 225)
-                            },
-                        );
-                    }
+                                let row_h = grid_body_h / pitch_span;
 
-                    let (grid_rect, _) = ui.allocate_exact_size(
-                        Vec2::new(grid_content_w, total_h),
-                        Sense::click(),
-                    );
-                    let painter = ui.painter_at(grid_rect);
-                    painter.rect_filled(grid_rect, 2.0, Color32::from_rgb(20, 22, 25));
+                                let ruler_keys = Rect::from_min_size(
+                                    keys_rect.min,
+                                    Vec2::new(keys_rect.width(), PIANO_RULER_H),
+                                );
+                                keys_painter.rect_filled(ruler_keys, 0.0, Color32::from_rgb(32, 34, 40));
 
-                    let ruler_rect = Rect::from_min_size(
-                        grid_rect.min,
-                        Vec2::new(grid_rect.width(), PIANO_RULER_H),
-                    );
-                    let body_rect = Rect::from_min_size(
-                        Pos2::new(grid_rect.left(), ruler_rect.bottom()),
-                        Vec2::new(grid_rect.width(), grid_body_h),
-                    );
-                    painter.rect_filled(ruler_rect, 0.0, Color32::from_rgb(30, 32, 38));
-                    painter.line_segment(
-                        [
-                            Pos2::new(grid_rect.left(), ruler_rect.bottom()),
-                            Pos2::new(grid_rect.right(), ruler_rect.bottom()),
-                        ],
-                        Stroke::new(1.0, Color32::from_rgb(55, 58, 65)),
-                    );
+                                for p in pitch_min..=pitch_max {
+                                    let row_from_bottom = (p - pitch_min) as f32;
+                                    let y_cell_bottom = keys_rect.bottom() - row_from_bottom * row_h;
+                                    let y_cell_top = y_cell_bottom - row_h;
+                                    let cell = Rect::from_min_max(
+                                        Pos2::new(keys_rect.left(), y_cell_top),
+                                        Pos2::new(keys_rect.right(), y_cell_bottom),
+                                    );
+                                    let black = matches!(p % 12, 1 | 3 | 6 | 8 | 10);
+                                    if black {
+                                        keys_painter.rect_filled(cell, 0.0, Color32::from_rgb(34, 36, 40));
+                                    }
+                                    keys_painter.text(
+                                        cell.left_center() + Vec2::new(4.0, 0.0),
+                                        egui::Align2::LEFT_CENTER,
+                                        midi_note_name(p),
+                                        egui::TextStyle::Small.resolve(ui.style()),
+                                        if black {
+                                            Color32::from_rgb(190, 195, 205)
+                                        } else {
+                                            Color32::from_rgb(215, 218, 225)
+                                        },
+                                    );
+                                }
 
-                    let beat_w = body_rect.width() / clip_len;
-                    for sixteenth in 0..=(clip_len * 4.0).ceil() as i32 {
-                        let t = sixteenth as f32 / 4.0;
-                        if t > clip_len + 0.001 {
-                            break;
-                        }
-                        let x = body_rect.left() + t * beat_w;
-                        let is_beat = sixteenth % 4 == 0;
-                        let is_bar = sixteenth % 16 == 0;
-                        let (w, c) = if is_bar {
-                            (1.5, Color32::from_rgb(100, 108, 120))
-                        } else if is_beat {
-                            (1.0, Color32::from_rgb(55, 60, 70))
-                        } else {
-                            (1.0, Color32::from_rgb(40, 44, 52))
-                        };
-                        painter.line_segment(
-                            [
-                                Pos2::new(x, ruler_rect.top()),
-                                Pos2::new(x, grid_rect.bottom()),
-                            ],
-                            Stroke::new(w, c),
-                        );
-                    }
+                                let (grid_rect, _) = ui.allocate_exact_size(
+                                    Vec2::new(grid_content_w, total_h),
+                                    Sense::click(),
+                                );
+                                let painter = ui.painter_at(grid_rect);
+                                painter.rect_filled(grid_rect, 2.0, Color32::from_rgb(20, 22, 25));
 
-                    for beat_i in 0..=clip_len.ceil() as usize {
-                        let t = beat_i as f32;
-                        let x = body_rect.left() + t * beat_w;
-                        let bar_in_clip = ((t / BEATS_PER_BAR).floor() as i32) + 1;
-                        let beat_in_bar = ((t % BEATS_PER_BAR).floor() as i32) + 1;
-                        painter.text(
-                            Pos2::new(x + 2.0, ruler_rect.top() + 3.0),
-                            egui::Align2::LEFT_TOP,
-                            format!("{bar_in_clip}.{beat_in_bar}"),
-                            egui::TextStyle::Small.resolve(ui.style()),
-                            Color32::from_rgb(175, 180, 190),
-                        );
-                    }
+                                let ruler_rect = Rect::from_min_size(
+                                    grid_rect.min,
+                                    Vec2::new(grid_rect.width(), PIANO_RULER_H),
+                                );
+                                let body_rect = Rect::from_min_size(
+                                    Pos2::new(grid_rect.left(), ruler_rect.bottom()),
+                                    Vec2::new(grid_rect.width(), grid_body_h),
+                                );
+                                painter.rect_filled(ruler_rect, 0.0, Color32::from_rgb(30, 32, 38));
+                                painter.line_segment(
+                                    [
+                                        Pos2::new(grid_rect.left(), ruler_rect.bottom()),
+                                        Pos2::new(grid_rect.right(), ruler_rect.bottom()),
+                                    ],
+                                    Stroke::new(1.0, Color32::from_rgb(55, 58, 65)),
+                                );
 
-                    for p in pitch_min..=pitch_max {
-                        let row_from_bottom = (p - pitch_min) as f32;
-                        let y = body_rect.bottom() - row_from_bottom * row_h;
-                        let black = matches!(p % 12, 1 | 3 | 6 | 8 | 10);
-                        if black {
-                            painter.rect_filled(
-                                Rect::from_min_max(
-                                    Pos2::new(body_rect.left(), y - row_h),
-                                    Pos2::new(body_rect.right(), y),
-                                ),
-                                0.0,
-                                Color32::from_rgb(24, 26, 30),
-                            );
-                        }
-                        painter.line_segment(
-                            [
-                                Pos2::new(body_rect.left(), y),
-                                Pos2::new(body_rect.right(), y),
-                            ],
-                            Stroke::new(1.0, Color32::from_rgb(38, 42, 48)),
-                        );
-                    }
+                                let beat_w = body_rect.width() / clip_len;
+                                for sixteenth in 0..=(clip_len * 4.0).ceil() as i32 {
+                                    let t = sixteenth as f32 / 4.0;
+                                    if t > clip_len + 0.001 {
+                                        break;
+                                    }
+                                    let x = body_rect.left() + t * beat_w;
+                                    let is_beat = sixteenth % 4 == 0;
+                                    let is_bar = sixteenth % 16 == 0;
+                                    let (w, c) = if is_bar {
+                                        (1.5, Color32::from_rgb(100, 108, 120))
+                                    } else if is_beat {
+                                        (1.0, Color32::from_rgb(55, 60, 70))
+                                    } else {
+                                        (1.0, Color32::from_rgb(40, 44, 52))
+                                    };
+                                    painter.line_segment(
+                                        [
+                                            Pos2::new(x, ruler_rect.top()),
+                                            Pos2::new(x, grid_rect.bottom()),
+                                        ],
+                                        Stroke::new(w, c),
+                                    );
+                                }
 
-                    for note in &clip.notes {
-                        if note.pitch < pitch_min || note.pitch > pitch_max {
-                            continue;
-                        }
-                        let x = body_rect.left() + note.start_beat * beat_w;
-                        let y_bottom = body_rect.bottom()
-                            - (note.pitch - pitch_min) as f32 * row_h;
-                        let vel_h = row_h * (0.28 + 0.72 * note.velocity.clamp(0.0, 1.0));
-                        let y_top = y_bottom - vel_h;
-                        let note_rect = Rect::from_min_size(
-                            Pos2::new(x, y_top),
-                            Vec2::new(
-                                (note.length_beats * beat_w).max(3.0),
-                                vel_h.max(3.0),
-                            ),
-                        );
-                        let base = Color32::from_rgb(210, 132, 74);
-                        let top = Color32::from_rgb(245, 188, 120);
-                        painter.rect_filled(note_rect, 2.0, base);
-                        painter.line_segment(
-                            [
-                                note_rect.left_top() + Vec2::new(0.0, 2.0),
-                                note_rect.right_top() + Vec2::new(0.0, 2.0),
-                            ],
-                            Stroke::new(2.0, top),
-                        );
-                    }
+                                for beat_i in 0..=clip_len.ceil() as usize {
+                                    let t = beat_i as f32;
+                                    let x = body_rect.left() + t * beat_w;
+                                    let bar_in_clip = ((t / BEATS_PER_BAR).floor() as i32) + 1;
+                                    let beat_in_bar = ((t % BEATS_PER_BAR).floor() as i32) + 1;
+                                    painter.text(
+                                        Pos2::new(x + 2.0, ruler_rect.top() + 3.0),
+                                        egui::Align2::LEFT_TOP,
+                                        format!("{bar_in_clip}.{beat_in_bar}"),
+                                        egui::TextStyle::Small.resolve(ui.style()),
+                                        Color32::from_rgb(175, 180, 190),
+                                    );
+                                }
 
-                    let clip_playhead = self.playhead_beat_display() - clip.start_beat;
-                    if (-0.05..=clip_len + 0.05).contains(&clip_playhead) {
-                        let playhead_x = body_rect.left() + clip_playhead * beat_w;
-                        painter.line_segment(
-                            [
-                                Pos2::new(playhead_x, ruler_rect.top()),
-                                Pos2::new(playhead_x, grid_rect.bottom()),
-                            ],
-                            Stroke::new(2.0, Color32::from_rgb(255, 210, 90)),
-                        );
-                        painter.circle_filled(
-                            Pos2::new(playhead_x, ruler_rect.top() + 8.0),
-                            5.0,
-                            Color32::from_rgb(255, 220, 100),
-                        );
-                    }
-                });
-            });
+                                for p in pitch_min..=pitch_max {
+                                    let row_from_bottom = (p - pitch_min) as f32;
+                                    let y = body_rect.bottom() - row_from_bottom * row_h;
+                                    let black = matches!(p % 12, 1 | 3 | 6 | 8 | 10);
+                                    if black {
+                                        painter.rect_filled(
+                                            Rect::from_min_max(
+                                                Pos2::new(body_rect.left(), y - row_h),
+                                                Pos2::new(body_rect.right(), y),
+                                            ),
+                                            0.0,
+                                            Color32::from_rgb(24, 26, 30),
+                                        );
+                                    }
+                                    painter.line_segment(
+                                        [
+                                            Pos2::new(body_rect.left(), y),
+                                            Pos2::new(body_rect.right(), y),
+                                        ],
+                                        Stroke::new(1.0, Color32::from_rgb(38, 42, 48)),
+                                    );
+                                }
+
+                                for note in &clip.notes {
+                                    if note.pitch < pitch_min || note.pitch > pitch_max {
+                                        continue;
+                                    }
+                                    let x = body_rect.left() + note.start_beat * beat_w;
+                                    let y_bottom = body_rect.bottom()
+                                        - (note.pitch - pitch_min) as f32 * row_h;
+                                    let vel_h = row_h * (0.28 + 0.72 * note.velocity.clamp(0.0, 1.0));
+                                    let y_top = y_bottom - vel_h;
+                                    let note_rect = Rect::from_min_size(
+                                        Pos2::new(x, y_top),
+                                        Vec2::new(
+                                            (note.length_beats * beat_w).max(3.0),
+                                            vel_h.max(3.0),
+                                        ),
+                                    );
+                                    let base = Color32::from_rgb(210, 132, 74);
+                                    let top = Color32::from_rgb(245, 188, 120);
+                                    painter.rect_filled(note_rect, 2.0, base);
+                                    painter.line_segment(
+                                        [
+                                            note_rect.left_top() + Vec2::new(0.0, 2.0),
+                                            note_rect.right_top() + Vec2::new(0.0, 2.0),
+                                        ],
+                                        Stroke::new(2.0, top),
+                                    );
+                                }
+
+                                let clip_playhead = self.playhead_beat_display() - clip.start_beat;
+                                if (-0.05..=clip_len + 0.05).contains(&clip_playhead) {
+                                    let playhead_x = body_rect.left() + clip_playhead * beat_w;
+                                    painter.line_segment(
+                                        [
+                                            Pos2::new(playhead_x, ruler_rect.top()),
+                                            Pos2::new(playhead_x, grid_rect.bottom()),
+                                        ],
+                                        Stroke::new(2.0, Color32::from_rgb(255, 210, 90)),
+                                    );
+                                    painter.circle_filled(
+                                        Pos2::new(playhead_x, ruler_rect.top() + 8.0),
+                                        5.0,
+                                        Color32::from_rgb(255, 220, 100),
+                                    );
+                                }
+                            });
+                        });
+                }
+            }
+        });
     }
 
     fn selected_clip_data(&self) -> Option<(String, String, Clip)> {
