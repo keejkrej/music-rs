@@ -73,8 +73,8 @@ impl DawApp {
                     self.new_blank_project();
                     ui.close();
                 }
-                if ui.button("Open Project...").clicked() {
-                    self.open_project_dialog();
+                if ui.button("Open project.json...").clicked() {
+                    self.open_project_manifest_dialog();
                     ui.close();
                 }
                 if ui.button("Open Project Folder...").clicked() {
@@ -86,12 +86,8 @@ impl DawApp {
                     self.run_io(|this| this.save_project());
                     ui.close();
                 }
-                if ui.button("Save As...").clicked() {
-                    self.save_project_as_dialog();
-                    ui.close();
-                }
-                if ui.button("Save Project Folder...").clicked() {
-                    self.save_project_folder_dialog();
+                if ui.button("Save Project As (folder)...").clicked() {
+                    self.save_project_as_folder_dialog();
                     ui.close();
                 }
                 ui.separator();
@@ -644,15 +640,22 @@ impl DawApp {
         self.status = "New blank project".to_owned();
     }
 
-    fn open_project_dialog(&mut self) {
+    fn open_project_manifest_dialog(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Music RS project", &["json"])
+            .add_filter("Project manifest (project.json)", &["json"])
             .set_directory(default_open_dir())
             .pick_file()
         else {
             self.status = "Open canceled".to_owned();
             return;
         };
+        if path.file_name().and_then(|n| n.to_str()) != Some(project_io::PROJECT_MANIFEST) {
+            self.status = format!(
+                "Please select a file named {}",
+                project_io::PROJECT_MANIFEST
+            );
+            return;
+        }
         self.run_io(|this| this.load_project_from_path(&path));
     }
 
@@ -678,21 +681,7 @@ impl DawApp {
         });
     }
 
-    fn save_project_as_dialog(&mut self) {
-        let Some(path) = rfd::FileDialog::new()
-            .add_filter("JSON project", &["json"])
-            .set_directory(default_open_dir())
-            .set_file_name(project_file_name(&self.project.name))
-            .save_file()
-        else {
-            self.status = "Save canceled".to_owned();
-            return;
-        };
-        self.project_path = path.display().to_string();
-        self.run_io(|this| this.save_project());
-    }
-
-    fn save_project_folder_dialog(&mut self) {
+    fn save_project_as_folder_dialog(&mut self) {
         let Some(dir) = rfd::FileDialog::new()
             .set_directory(default_open_dir())
             .pick_folder()
@@ -906,10 +895,6 @@ fn default_audio_dir() -> PathBuf {
     dirs::audio_dir()
         .or_else(dirs::document_dir)
         .unwrap_or_else(|| PathBuf::from("."))
-}
-
-fn project_file_name(name: &str) -> String {
-    format!("{}.json", file_stem(name))
 }
 
 fn project_wav_name(name: &str) -> String {

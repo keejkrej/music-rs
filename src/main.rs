@@ -27,8 +27,15 @@ fn run() -> anyhow::Result<()> {
             .context("midi-to-json: missing input path (.mid / .midi)")?;
         let out = args
             .get(2)
-            .context("midi-to-json: missing output path (.json or .../project.json)")?;
+            .context("midi-to-json: missing output directory or .../project.json path")?;
         return run_midi_to_json(Path::new(mid), Path::new(out));
+    }
+
+    if args.first().is_some_and(|s| s == "resave-project") {
+        let path = args
+            .get(1)
+            .context("resave-project: missing project directory or project.json path")?;
+        return run_resave_project(Path::new(path));
     }
 
     let control_server = parse_control_server(&args)?;
@@ -45,13 +52,22 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
+fn run_resave_project(path: &Path) -> anyhow::Result<()> {
+    let project = project_io::load_project(path)?;
+    let manifest = project_io::resolve_manifest_path(path)?;
+    project_io::save_project(&project, &manifest)?;
+    eprintln!("rewrote {}", manifest.display());
+    Ok(())
+}
+
 fn print_usage() {
     println!(
         "\
 usage:
   daw
   daw serve [<port>]
-  daw midi-to-json <input.mid> <output.json|.../project.json>
+  daw midi-to-json <input.mid> <output_dir|.../project.json>
+  daw resave-project <project_dir|.../project.json>
   daw --help
 "
     );
@@ -59,17 +75,27 @@ usage:
 
 fn run_midi_to_json(mid: &Path, out: &Path) -> anyhow::Result<()> {
     let project = midi_import::import_midi_path(mid)?;
-    if project_io::is_split_manifest_path(out) {
-        project_io::save_project(&project, out)?;
+    let manifest = if project_io::is_split_manifest_path(out) {
+        out.to_path_buf()
+    } else if out
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("json"))
+    {
+        anyhow::bail!(
+            "midi-to-json output must be a directory or a path ending in {}; got {}",
+            project_io::PROJECT_MANIFEST,
+            out.display()
+        );
     } else {
-        if let Some(parent) = out.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
+        out.join(project_io::PROJECT_MANIFEST)
+    };
+    if let Some(parent) = manifest.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
         }
-        std::fs::write(out, project.to_json()?)
-            .with_context(|| format!("writing {}", out.display()))?;
     }
+    project_io::save_project(&project, &manifest)?;
     Ok(())
 }
 
@@ -88,7 +114,7 @@ fn parse_control_server(args: &[String]) -> anyhow::Result<Option<ControlServer>
             Ok(Some(server))
         }
         _ => anyhow::bail!(
-            "usage: daw | daw serve [<port>] | daw midi-to-json <in.mid> <out.json> | daw --help"
+            "usage: daw | daw serve [<port>] | daw midi-to-json <in.mid> <out_dir|.../project.json> | daw resave-project <project> | daw --help"
         ),
     }
 }

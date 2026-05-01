@@ -2,10 +2,11 @@
 
 `daw` starts as a manual loop-sketch DAW with a blank project. It has no AI prompt box in the UI.
 
-Use `File > Open Project...` to load a `.json` project with the native file dialog. Bundled project files live in `examples/projects/`:
+Projects on disk are always a **folder** with `project.json` plus one JSON file per track under `tracks/`. Each note in a track file is a compact four-number array (same information as a MIDI note-on plus duration in beats):
 
-- `happy_birthday.json`
-- `smells_like_teen_spirit_snippet.json`
+`[pitch, velocity_midi, start_beat, length_beats]`
+
+`velocity_midi` is a standard MIDI velocity (0–127). Use `File > Open project.json...` or **Open Project Folder...** to load. A small example lives at `examples/projects/happy_birthday/`.
 
 External agents can control the same DAW over a localhost WebSocket using JSON-RPC 2.0:
 
@@ -44,3 +45,17 @@ Error response:
 Supported methods are `get_summary`, `get_project`, `apply_commands`, `play`, `stop`, `undo`, `redo`, `save`, `load`, and `export_wav`.
 
 `apply_commands` accepts the structured edit protocol from `src/commands.rs`, including `create_track`, `add_notes`, `replace_clip`, `set_tempo`, `make_drum_pattern`, `arrange_loop`, and `set_mixer`.
+
+Convert a Standard MIDI File into the same project layout:
+
+```bash
+cargo run -- midi-to-json piece.mid ./my_project
+# writes ./my_project/project.json and ./my_project/tracks/*.json
+```
+
+Track files are named from each track’s **title** (e.g. `000_kurt_cobain_vocals.json`), not its internal id. To rewrite an existing folder on disk (refresh filenames and strip stale `tracks/*.json`), run:
+
+```bash
+cargo run -- resave-project /path/to/project_or_project.json
+```
+

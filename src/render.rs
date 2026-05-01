@@ -167,18 +167,21 @@ fn float_to_i16(sample: f32) -> i16 {
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
     use crate::{
         commands::{DrumStyle, EditCommand, apply_command},
         project::Project,
+        project_io,
     };
 
     #[test]
     fn render_project_matches_per_frame_mix() {
-        let mut project = Project::default();
+        let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/projects/happy_birthday");
+        let mut project = project_io::load_project(&sample).unwrap();
         project.tempo_bpm = 120.0;
         project.loop_bars = 4;
-        project.tracks = Project::birthday_demo().tracks;
 
         let sr = 2_000;
         let frames = render_project(&project, sr);
@@ -203,15 +206,15 @@ mod tests {
     }
 
     #[test]
-    fn default_project_renders_audio() {
-        for project in [Project::birthday_demo(), Project::teen_spirit_demo()] {
-            let frames = render_project(&project, 8_000);
-            let peak = frames
-                .iter()
-                .map(|frame| frame.left.abs().max(frame.right.abs()))
-                .fold(0.0, f32::max);
-            assert!(peak > 0.01);
-        }
+    fn bundled_example_renders_audio() {
+        let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/projects/happy_birthday");
+        let project = project_io::load_project(&sample).unwrap();
+        let frames = render_project(&project, 8_000);
+        let peak = frames
+            .iter()
+            .map(|frame| frame.left.abs().max(frame.right.abs()))
+            .fold(0.0, f32::max);
+        assert!(peak > 0.01);
     }
 
     #[test]

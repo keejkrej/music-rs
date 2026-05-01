@@ -1,7 +1,10 @@
+use std::path::Path;
+
 use music_rs::{
     ai::{RuleBasedProvider, validated_ai_edits},
     commands::{EditCommand, apply_commands},
     project::Project,
+    project_io,
     render::export_wav,
     undo::{UndoStack, apply_undoable},
 };
@@ -51,8 +54,14 @@ fn ai_loop_can_be_edited_saved_loaded_and_exported() {
     )
     .unwrap();
 
-    let json = project.to_json().unwrap();
-    let loaded = Project::from_json(&json).unwrap();
+    let dir = std::env::temp_dir().join(format!(
+        "music-rs-acceptance-io-{}",
+        music_rs::project::new_id()
+    ));
+    std::fs::create_dir_all(&dir).unwrap();
+    let manifest = dir.join(project_io::PROJECT_MANIFEST);
+    project_io::save_project(&project, &manifest).unwrap();
+    let loaded = project_io::load_project(&dir).unwrap();
     assert_eq!(loaded.loop_bars, 8);
     assert_eq!(loaded.tempo_bpm, 124.0);
 
@@ -64,24 +73,21 @@ fn ai_loop_can_be_edited_saved_loaded_and_exported() {
     let reader = hound::WavReader::open(&path).unwrap();
     assert_eq!(reader.spec().channels, 2);
     assert!(reader.duration() > 0);
+    let _ = std::fs::remove_dir_all(&dir);
     let _ = std::fs::remove_file(path);
 }
 
 #[test]
-fn bundled_projects_load_and_render() {
-    for json in [
-        include_str!("../examples/projects/happy_birthday.json"),
-        include_str!("../examples/projects/smells_like_teen_spirit_snippet.json"),
-    ] {
-        let project = Project::from_json(json).unwrap();
-        assert!(!project.tracks.is_empty());
-        let path = std::env::temp_dir().join(format!(
-            "music-rs-bundled-{}.wav",
-            music_rs::project::new_id()
-        ));
-        export_wav(&project, &path).unwrap();
-        let reader = hound::WavReader::open(&path).unwrap();
-        assert!(reader.duration() > 0);
-        let _ = std::fs::remove_file(path);
-    }
+fn bundled_example_project_loads_and_renders() {
+    let sample = Path::new(env!("CARGO_MANIFEST_DIR")).join("examples/projects/happy_birthday");
+    let project = project_io::load_project(&sample).unwrap();
+    assert!(!project.tracks.is_empty());
+    let path = std::env::temp_dir().join(format!(
+        "music-rs-bundled-{}.wav",
+        music_rs::project::new_id()
+    ));
+    export_wav(&project, &path).unwrap();
+    let reader = hound::WavReader::open(&path).unwrap();
+    assert!(reader.duration() > 0);
+    let _ = std::fs::remove_file(path);
 }

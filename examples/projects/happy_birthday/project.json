@@ -1,0 +1,14 @@
+{
+  "schema": "music-rs-project/v1",
+  "name": "Happy Birthday",
+  "tempo_bpm": 112.0,
+  "loop_start_bar": 0,
+  "loop_bars": 8,
+  "master_gain": 0.78,
+  "tracks": [
+    "tracks/000_birthday_lead.json",
+    "tracks/001_chords.json",
+    "tracks/002_bass.json",
+    "tracks/003_drums.json"
+  ]
+}
