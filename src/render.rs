@@ -19,6 +19,30 @@ pub fn loop_length_frames(project: &Project, sample_rate: u32) -> u64 {
     (length_seconds * sample_rate as f32).round() as u64
 }
 
+fn seconds_per_beat(tempo_bpm: f32) -> f32 {
+    60.0 / tempo_bpm.max(1.0)
+}
+
+/// Absolute beat in the project → sample index within the loop render window `[0, loop_frames)`.
+pub fn beat_in_loop_region_to_frame(
+    project: &Project,
+    beat_absolute: f32,
+    sample_rate: u32,
+    loop_frames: u64,
+) -> u64 {
+    if loop_frames == 0 {
+        return 0;
+    }
+    let loop_start = project.loop_start_beat();
+    let loop_len = project.loop_length_beats();
+    let loop_end = loop_start + loop_len;
+    let clamped = beat_absolute.clamp(loop_start, loop_end);
+    let offset_beats = clamped - loop_start;
+    let seconds = offset_beats * seconds_per_beat(project.tempo_bpm);
+    let frame = (seconds * sample_rate as f32).round() as u64;
+    frame.min(loop_frames.saturating_sub(1))
+}
+
 /// Mix one stereo frame at `sample_index_in_loop` (0 .. `loop_length_frames`).
 pub fn mix_stereo_frame(project: &Project, sample_index_in_loop: u64, sample_rate: u32) -> StereoFrame {
     let seconds_per_beat = 60.0 / project.tempo_bpm.max(1.0);

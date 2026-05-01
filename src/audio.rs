@@ -8,7 +8,7 @@ use cpal::{
 
 use crate::{
     project::Project,
-    render::{StereoFrame, loop_length_frames, mix_stereo_frame},
+    render::{StereoFrame, beat_in_loop_region_to_frame, loop_length_frames, mix_stereo_frame},
 };
 
 #[derive(Debug)]
@@ -52,7 +52,8 @@ impl Default for AudioEngine {
 }
 
 impl AudioEngine {
-    pub fn play(&mut self, project: &Project, looping: bool) -> Result<()> {
+    /// Start playback from `start_beat` (absolute project beat), clamped to the current loop region.
+    pub fn play_from_beat(&mut self, project: &Project, looping: bool, start_beat: f32) -> Result<()> {
         self.stop();
 
         let host = cpal::default_host();
@@ -65,6 +66,7 @@ impl AudioEngine {
 
         let source = Arc::new(project.clone());
         let loop_frames = loop_length_frames(&source, sample_rate);
+        let start_frame = beat_in_loop_region_to_frame(project, start_beat, sample_rate, loop_frames);
 
         {
             let mut state = self
@@ -73,7 +75,7 @@ impl AudioEngine {
                 .map_err(|_| anyhow!("audio state lock poisoned"))?;
             state.source = Some(source);
             state.loop_frames = loop_frames;
-            state.position = 0;
+            state.position = start_frame;
             state.sample_rate = sample_rate;
             state.playing = true;
             state.looping = looping;
@@ -98,6 +100,29 @@ impl AudioEngine {
         stream.play().context("failed to start output stream")?;
         self.stream = Some(stream);
         Ok(())
+    }
+
+    /// Playback from the beginning of the loop region (same as `play_from_beat` at [`Project::loop_start_beat`]).
+    pub fn play(&mut self, project: &Project, looping: bool) -> Result<()> {
+        let start = project.loop_start_beat();
+        self.play_from_beat(project, looping, start)
+    }
+
+    /// If a stream is running, jump the read position so the next sample matches `start_beat` in the loop window.
+    pub fn seek_to_beat(&self, project: &Project, start_beat: f32) {
+        let Ok(mut state) = self.state.lock() else {
+            return;
+        };
+        if !state.playing || state.loop_frames == 0 || state.source.is_none() {
+            return;
+        }
+        let start_frame = beat_in_loop_region_to_frame(
+            project,
+            start_beat,
+            state.sample_rate,
+            state.loop_frames,
+        );
+        state.position = start_frame;
     }
 
     pub fn stop(&mut self) {
