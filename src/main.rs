@@ -1,5 +1,10 @@
+use std::path::Path;
+
+use anyhow::Context;
 use music_rs::app::DawApp;
 use music_rs::control::{ControlServer, start_control_server};
+use music_rs::midi_import;
+use music_rs::project_io;
 
 fn main() {
     if let Err(err) = run() {
@@ -9,7 +14,24 @@ fn main() {
 }
 
 fn run() -> anyhow::Result<()> {
-    let control_server = parse_control_server()?;
+    let args: Vec<String> = std::env::args().skip(1).collect();
+
+    if args.iter().any(|a| a == "--help" || a == "-h") {
+        print_usage();
+        return Ok(());
+    }
+
+    if args.first().is_some_and(|s| s == "midi-to-json") {
+        let mid = args
+            .get(1)
+            .context("midi-to-json: missing input path (.mid / .midi)")?;
+        let out = args
+            .get(2)
+            .context("midi-to-json: missing output path (.json or .../project.json)")?;
+        return run_midi_to_json(Path::new(mid), Path::new(out));
+    }
+
+    let control_server = parse_control_server(&args)?;
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default().with_inner_size([1180.0, 760.0]),
         ..Default::default()
@@ -23,9 +45,36 @@ fn run() -> anyhow::Result<()> {
     Ok(())
 }
 
-fn parse_control_server() -> anyhow::Result<Option<ControlServer>> {
-    let args = std::env::args().skip(1).collect::<Vec<_>>();
-    match args.as_slice() {
+fn print_usage() {
+    println!(
+        "\
+usage:
+  daw
+  daw serve [<port>]
+  daw midi-to-json <input.mid> <output.json|.../project.json>
+  daw --help
+"
+    );
+}
+
+fn run_midi_to_json(mid: &Path, out: &Path) -> anyhow::Result<()> {
+    let project = midi_import::import_midi_path(mid)?;
+    if project_io::is_split_manifest_path(out) {
+        project_io::save_project(&project, out)?;
+    } else {
+        if let Some(parent) = out.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)?;
+            }
+        }
+        std::fs::write(out, project.to_json()?)
+            .with_context(|| format!("writing {}", out.display()))?;
+    }
+    Ok(())
+}
+
+fn parse_control_server(args: &[String]) -> anyhow::Result<Option<ControlServer>> {
+    match args {
         [] => Ok(None),
         [mode, port] if mode == "serve" => {
             let port = port.parse::<u16>()?;
@@ -38,10 +87,8 @@ fn parse_control_server() -> anyhow::Result<Option<ControlServer>> {
             eprintln!("daw control listening on ws://{}", server.addr);
             Ok(Some(server))
         }
-        [flag] if flag == "--help" || flag == "-h" => {
-            println!("usage: daw [serve <port>]");
-            std::process::exit(0);
-        }
-        _ => anyhow::bail!("usage: daw [serve <port>]"),
+        _ => anyhow::bail!(
+            "usage: daw | daw serve [<port>] | daw midi-to-json <in.mid> <out.json> | daw --help"
+        ),
     }
 }

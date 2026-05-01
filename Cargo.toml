@@ -15,6 +15,7 @@ dirs = "6.0.0"
 eframe = "0.34.1"
 egui = "0.34.1"
 hound = "3.5.1"
+midly = { version = "0.5.3", default-features = false, features = ["std", "alloc"] }
 rfd = "0.17.2"
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.149"

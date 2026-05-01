@@ -12,6 +12,7 @@ use crate::{
     commands::{EditCommand, apply_commands},
     control::{ControlRequest, ControlServer, error, ok},
     project::{Clip, Instrument, MidiNote, Project, Waveform, midi_note_name},
+    project_io,
     render::export_wav,
     undo::{UndoStack, apply_undoable},
 };
@@ -76,6 +77,10 @@ impl DawApp {
                     self.open_project_dialog();
                     ui.close();
                 }
+                if ui.button("Open Project Folder...").clicked() {
+                    self.open_project_folder_dialog();
+                    ui.close();
+                }
                 ui.separator();
                 if ui.button("Save").clicked() {
                     self.run_io(|this| this.save_project());
@@ -83,6 +88,10 @@ impl DawApp {
                 }
                 if ui.button("Save As...").clicked() {
                     self.save_project_as_dialog();
+                    ui.close();
+                }
+                if ui.button("Save Project Folder...").clicked() {
+                    self.save_project_folder_dialog();
                     ui.close();
                 }
                 ui.separator();
@@ -647,9 +656,31 @@ impl DawApp {
         self.run_io(|this| this.load_project_from_path(&path));
     }
 
+    fn open_project_folder_dialog(&mut self) {
+        let Some(dir) = rfd::FileDialog::new()
+            .set_directory(default_open_dir())
+            .pick_folder()
+        else {
+            self.status = "Open canceled".to_owned();
+            return;
+        };
+        let manifest = dir.join(project_io::PROJECT_MANIFEST);
+        if !manifest.exists() {
+            self.status = format!(
+                "No {} in that folder",
+                project_io::PROJECT_MANIFEST
+            );
+            return;
+        }
+        self.run_io(|this| {
+            this.project_path = manifest.display().to_string();
+            this.load_project()
+        });
+    }
+
     fn save_project_as_dialog(&mut self) {
         let Some(path) = rfd::FileDialog::new()
-            .add_filter("Music RS project", &["json"])
+            .add_filter("JSON project", &["json"])
             .set_directory(default_open_dir())
             .set_file_name(project_file_name(&self.project.name))
             .save_file()
@@ -658,6 +689,19 @@ impl DawApp {
             return;
         };
         self.project_path = path.display().to_string();
+        self.run_io(|this| this.save_project());
+    }
+
+    fn save_project_folder_dialog(&mut self) {
+        let Some(dir) = rfd::FileDialog::new()
+            .set_directory(default_open_dir())
+            .pick_folder()
+        else {
+            self.status = "Save canceled".to_owned();
+            return;
+        };
+        let manifest = dir.join(project_io::PROJECT_MANIFEST);
+        self.project_path = manifest.display().to_string();
         self.run_io(|this| this.save_project());
     }
 
@@ -679,15 +723,22 @@ impl DawApp {
     }
 
     fn save_project(&self) -> Result<()> {
-        std::fs::write(&self.project_path, self.project.to_json()?)
+        let path = Path::new(&self.project_path);
+        if let Some(parent) = path.parent() {
+            if !parent.as_os_str().is_empty() {
+                std::fs::create_dir_all(parent)
+                    .with_context(|| format!("creating {}", parent.display()))?;
+            }
+        }
+        project_io::save_project(&self.project, path)
             .with_context(|| format!("saving {}", self.project_path))
     }
 
     fn load_project(&mut self) -> Result<()> {
-        let json = std::fs::read_to_string(&self.project_path)
-            .with_context(|| format!("loading {}", self.project_path))?;
+        let path = Path::new(&self.project_path);
         self.audio.stop();
-        self.project = Project::from_json(&json)?;
+        self.project = project_io::load_project(path)
+            .with_context(|| format!("loading {}", self.project_path))?;
         self.undo.clear();
         self.ensure_selection();
         Ok(())
@@ -837,7 +888,9 @@ fn instrument_label(instrument: &Instrument) -> &'static str {
 fn default_project_path() -> PathBuf {
     dirs::document_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("music-rs-project.json")
+        .join("music-rs-projects")
+        .join("Untitled")
+        .join(project_io::PROJECT_MANIFEST)
 }
 
 fn default_open_dir() -> PathBuf {

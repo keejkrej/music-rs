@@ -3,6 +3,8 @@ pub mod app;
 pub mod audio;
 pub mod commands;
 pub mod control;
+pub mod midi_import;
 pub mod project;
+pub mod project_io;
 pub mod render;
 pub mod undo;
