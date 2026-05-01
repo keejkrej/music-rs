@@ -343,6 +343,21 @@ impl DawApp {
                 );
             }
         }
+
+        let progress = self.audio.playback_progress();
+        let playhead_x = rect.left() + rect.width() * progress;
+        painter.line_segment(
+            [
+                Pos2::new(playhead_x, rect.top()),
+                Pos2::new(playhead_x, rect.bottom()),
+            ],
+            Stroke::new(2.0, Color32::from_rgb(255, 235, 130)),
+        );
+        painter.circle_filled(
+            Pos2::new(playhead_x, rect.top() + 5.0),
+            4.0,
+            Color32::from_rgb(255, 235, 130),
+        );
     }
 
     fn piano_roll(&mut self, ui: &mut egui::Ui) {
@@ -647,8 +662,8 @@ impl DawApp {
 impl eframe::App for DawApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.process_control_requests();
-        if self.control_server.is_some() {
-            ui.ctx().request_repaint_after(Duration::from_millis(50));
+        if self.control_server.is_some() || self.audio.is_playing() {
+            ui.ctx().request_repaint_after(Duration::from_millis(16));
         }
         if let Some(err) = self.audio.take_error() {
             self.status = format!("Audio error: {err}");

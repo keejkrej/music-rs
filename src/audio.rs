@@ -93,6 +93,21 @@ impl AudioEngine {
             .unwrap_or(false)
     }
 
+    pub fn playback_progress(&self) -> f32 {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| {
+                if state.frames.is_empty() {
+                    None
+                } else {
+                    Some(state.cursor as f32 / state.frames.len() as f32)
+                }
+            })
+            .unwrap_or(0.0)
+            .clamp(0.0, 1.0)
+    }
+
     pub fn take_error(&self) -> Option<String> {
         self.last_error.lock().ok()?.take()
     }
