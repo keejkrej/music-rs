@@ -1,6 +1,11 @@
 # Music RS
 
-`daw` starts as a manual loop-sketch DAW. It has no AI prompt box in the UI.
+`daw` starts as a manual loop-sketch DAW with a blank project. It has no AI prompt box in the UI.
+
+Use `File > Open Project...` to load a `.json` project with the native file dialog. Bundled project files live in `examples/projects/`:
+
+- `happy_birthday.json`
+- `smells_like_teen_spirit_snippet.json`
 
 External agents can control the same DAW over a localhost WebSocket using JSON-RPC 2.0:
 

@@ -66,3 +66,22 @@ fn ai_loop_can_be_edited_saved_loaded_and_exported() {
     assert!(reader.duration() > 0);
     let _ = std::fs::remove_file(path);
 }
+
+#[test]
+fn bundled_projects_load_and_render() {
+    for json in [
+        include_str!("../examples/projects/happy_birthday.json"),
+        include_str!("../examples/projects/smells_like_teen_spirit_snippet.json"),
+    ] {
+        let project = Project::from_json(json).unwrap();
+        assert!(!project.tracks.is_empty());
+        let path = std::env::temp_dir().join(format!(
+            "music-rs-bundled-{}.wav",
+            music_rs::project::new_id()
+        ));
+        export_wav(&project, &path).unwrap();
+        let reader = hound::WavReader::open(&path).unwrap();
+        assert!(reader.duration() > 0);
+        let _ = std::fs::remove_file(path);
+    }
+}

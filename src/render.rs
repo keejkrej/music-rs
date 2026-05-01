@@ -175,19 +175,20 @@ mod tests {
 
     #[test]
     fn default_project_renders_audio() {
-        let project = Project::default();
-        let frames = render_project(&project, 8_000);
-        let peak = frames
-            .iter()
-            .map(|frame| frame.left.abs().max(frame.right.abs()))
-            .fold(0.0, f32::max);
-        assert!(peak > 0.01);
+        for project in [Project::birthday_demo(), Project::teen_spirit_demo()] {
+            let frames = render_project(&project, 8_000);
+            let peak = frames
+                .iter()
+                .map(|frame| frame.left.abs().max(frame.right.abs()))
+                .fold(0.0, f32::max);
+            assert!(peak > 0.01);
+        }
     }
 
     #[test]
     fn render_stays_in_sample_bounds() {
         let mut project = Project::default();
-        let drum_id = project.tracks[0].id.clone();
+        let drum_id = project.create_track("Drums", crate::project::Instrument::DrumSampler);
         apply_command(
             &mut project,
             EditCommand::MakeDrumPattern {

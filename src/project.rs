@@ -62,11 +62,22 @@ pub struct MidiNote {
 
 impl Default for Project {
     fn default() -> Self {
-        Self::birthday_demo()
+        Self::blank()
     }
 }
 
 impl Project {
+    pub fn blank() -> Self {
+        Self {
+            name: "Untitled Project".to_owned(),
+            tempo_bpm: 120.0,
+            loop_start_bar: 0,
+            loop_bars: 8,
+            master_gain: 0.85,
+            tracks: Vec::new(),
+        }
+    }
+
     pub fn birthday_demo() -> Self {
         let mut project = Self {
             name: "Birthday Demo".to_owned(),
@@ -140,6 +151,71 @@ impl Project {
                 track.gain = 0.55;
                 if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
                     for note in birthday_drums() {
+                        clip.add_note(note);
+                    }
+                }
+            }
+        }
+
+        project
+    }
+
+    pub fn teen_spirit_demo() -> Self {
+        let mut project = Self {
+            name: "Teen Spirit Intro Snippet".to_owned(),
+            tempo_bpm: 116.0,
+            loop_start_bar: 0,
+            loop_bars: 4,
+            master_gain: 0.8,
+            tracks: Vec::new(),
+        };
+        let loop_len = project.loop_length_beats();
+
+        let guitar = project.create_track(
+            "Fuzzy Guitar",
+            Instrument::Synth {
+                waveform: Waveform::Saw,
+            },
+        );
+        if let Some(clip_id) = project.add_clip(&guitar, "Power Chord Riff", 0.0, loop_len) {
+            let clip_id = clip_id.to_owned();
+            if let Some(track) = project.track_mut(&guitar) {
+                track.gain = 0.48;
+                track.pan = -0.12;
+                if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                    for note in teen_spirit_power_chords() {
+                        clip.add_note(note);
+                    }
+                }
+            }
+        }
+
+        let bass = project.create_track(
+            "Bass",
+            Instrument::Synth {
+                waveform: Waveform::Square,
+            },
+        );
+        if let Some(clip_id) = project.add_clip(&bass, "Driving Roots", 0.0, loop_len) {
+            let clip_id = clip_id.to_owned();
+            if let Some(track) = project.track_mut(&bass) {
+                track.gain = 0.52;
+                track.pan = 0.08;
+                if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                    for note in teen_spirit_bassline() {
+                        clip.add_note(note);
+                    }
+                }
+            }
+        }
+
+        let drums = project.create_track("Drums", Instrument::DrumSampler);
+        if let Some(clip_id) = project.add_clip(&drums, "Grunge Beat", 0.0, loop_len) {
+            let clip_id = clip_id.to_owned();
+            if let Some(track) = project.track_mut(&drums) {
+                track.gain = 0.66;
+                if let Some(clip) = track.clips.iter_mut().find(|clip| clip.id == clip_id) {
+                    for note in teen_spirit_drums() {
                         clip.add_note(note);
                     }
                 }
@@ -396,6 +472,104 @@ fn birthday_drums() -> Vec<MidiNote> {
     notes
 }
 
+fn teen_spirit_power_chords() -> Vec<MidiNote> {
+    let changes = [
+        (41, 0.0),
+        (46, 2.0),
+        (44, 4.0),
+        (49, 6.0),
+        (41, 8.0),
+        (46, 10.0),
+        (44, 12.0),
+        (49, 14.0),
+    ];
+    changes
+        .into_iter()
+        .flat_map(|(root, start)| {
+            [root, root + 7, root + 12]
+                .into_iter()
+                .flat_map(move |pitch| {
+                    [
+                        MidiNote {
+                            pitch,
+                            velocity: 0.82,
+                            start_beat: start,
+                            length_beats: 0.42,
+                        },
+                        MidiNote {
+                            pitch,
+                            velocity: 0.52,
+                            start_beat: start + 0.75,
+                            length_beats: 0.18,
+                        },
+                        MidiNote {
+                            pitch,
+                            velocity: 0.76,
+                            start_beat: start + 1.0,
+                            length_beats: 0.48,
+                        },
+                    ]
+                })
+        })
+        .collect()
+}
+
+fn teen_spirit_bassline() -> Vec<MidiNote> {
+    let changes = [
+        (29, 0.0),
+        (34, 2.0),
+        (32, 4.0),
+        (37, 6.0),
+        (29, 8.0),
+        (34, 10.0),
+        (32, 12.0),
+        (37, 14.0),
+    ];
+    changes
+        .into_iter()
+        .flat_map(|(pitch, start)| {
+            [0.0, 0.75, 1.0].into_iter().map(move |offset| MidiNote {
+                pitch,
+                velocity: if offset == 0.75 { 0.5 } else { 0.7 },
+                start_beat: start + offset,
+                length_beats: if offset == 0.75 { 0.16 } else { 0.42 },
+            })
+        })
+        .collect()
+}
+
+fn teen_spirit_drums() -> Vec<MidiNote> {
+    let mut notes = Vec::new();
+    for bar in 0..4 {
+        let base = bar as f32 * BEATS_PER_BAR;
+        for beat in [0.0, 2.0] {
+            notes.push(MidiNote {
+                pitch: 36,
+                velocity: 0.9,
+                start_beat: base + beat,
+                length_beats: 0.18,
+            });
+        }
+        for beat in [1.0, 3.0] {
+            notes.push(MidiNote {
+                pitch: 38,
+                velocity: 0.82,
+                start_beat: base + beat,
+                length_beats: 0.16,
+            });
+        }
+        for step in 0..8 {
+            notes.push(MidiNote {
+                pitch: 42,
+                velocity: if step % 2 == 0 { 0.42 } else { 0.24 },
+                start_beat: base + step as f32 * 0.5,
+                length_beats: 0.07,
+            });
+        }
+    }
+    notes
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,18 +584,25 @@ mod tests {
     }
 
     #[test]
-    fn default_project_is_playable() {
+    fn default_project_is_blank() {
         let project = Project::default();
-        assert_eq!(project.name, "Birthday Demo");
+        assert_eq!(project.name, "Untitled Project");
         assert_eq!(project.loop_bars, 8);
-        assert!(project.tracks.len() >= 4);
-        assert!(
-            project
-                .tracks
-                .iter()
-                .flat_map(|track| &track.clips)
-                .any(|clip| !clip.notes.is_empty())
-        );
+        assert!(project.tracks.is_empty());
+    }
+
+    #[test]
+    fn demo_projects_are_playable() {
+        for project in [Project::birthday_demo(), Project::teen_spirit_demo()] {
+            assert!(!project.tracks.is_empty());
+            assert!(
+                project
+                    .tracks
+                    .iter()
+                    .flat_map(|track| &track.clips)
+                    .any(|clip| !clip.notes.is_empty())
+            );
+        }
     }
 
     #[test]

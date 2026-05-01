@@ -398,7 +398,7 @@ mod tests {
     #[test]
     fn applies_drum_pattern() {
         let mut project = Project::default();
-        let drum_id = project.tracks[0].id.clone();
+        let drum_id = project.create_track("Drums", Instrument::DrumSampler);
         apply_command(
             &mut project,
             EditCommand::MakeDrumPattern {
