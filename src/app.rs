@@ -18,13 +18,24 @@ use crate::{
 };
 
 const SAMPLE_PROJECT_DIR: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/examples/projects");
-/// Timeline / piano-roll horizontal resolution (pixels per beat); scroll when the loop is wider.
+/// Timeline horizontal resolution (pixels per beat).
 const TIMELINE_PX_PER_BEAT: f32 = 28.0;
+/// Piano roll time columns: wider than the timeline for easier editing.
+const PIANO_PX_PER_BEAT: f32 = 40.0;
 const TIMELINE_RULER_H: f32 = 30.0;
 const TIMELINE_ROW_H: f32 = 22.0;
 const TIMELINE_ROW_GAP: f32 = 5.0;
-const PIANO_KEYS_W: f32 = 44.0;
+const PIANO_KEYS_W: f32 = 52.0;
 const PIANO_RULER_H: f32 = 24.0;
+/// Vertical size of one MIDI pitch row in the piano roll (scrolls when the panel is shorter).
+const PIANO_PX_PER_SEMITONE: f32 = 12.0;
+/// Inset for [`ScrollArea`] contents so scrollbars sit past the last track row / piano keys.
+const SCROLL_CONTENT_MARGIN: egui::Margin = egui::Margin {
+    left: 2,
+    right: 12,
+    top: 2,
+    bottom: 14,
+};
 
 pub struct DawApp {
     project: Project,
@@ -392,6 +403,7 @@ impl DawApp {
                 .id_salt("timeline_scroll")
                 .max_width(viewport_w)
                 .max_height(inner_h)
+                .content_margin(SCROLL_CONTENT_MARGIN)
                 .show(ui, |ui| {
                 let desired = Vec2::new(content_width, content_h);
                 let (outer_rect, outer_response) =
@@ -630,6 +642,7 @@ impl DawApp {
                     egui::ScrollArea::vertical()
                         .id_salt("piano_roll_empty_scroll")
                         .max_height(inner_h)
+                        .content_margin(SCROLL_CONTENT_MARGIN)
                         .show(ui, |ui| {
                             ui.label("Select a clip");
                         });
@@ -695,17 +708,18 @@ impl DawApp {
                     let viewport_w = ui.available_width();
                     let clip_len = clip.length_beats.max(1.0);
                     let grid_content_w =
-                        (clip_len * TIMELINE_PX_PER_BEAT).max(viewport_w - PIANO_KEYS_W);
+                        (clip_len * PIANO_PX_PER_BEAT).max(viewport_w - PIANO_KEYS_W);
                     let pitch_min = 36_u8;
                     let pitch_max = 84_u8;
                     let pitch_span = (pitch_max - pitch_min) as f32;
-                    let grid_body_h = (pitch_span * 7.0_f32).max(160.0);
+                    let grid_body_h = (pitch_span * PIANO_PX_PER_SEMITONE).max(280.0);
                     let total_h = PIANO_RULER_H + grid_body_h;
 
                     egui::ScrollArea::both()
                         .id_salt("piano_roll_scroll")
                         .max_width(viewport_w)
                         .max_height(inner_h)
+                        .content_margin(SCROLL_CONTENT_MARGIN)
                         .show(ui, |ui| {
                             ui.horizontal_top(|ui| {
                                 let (keys_rect, _) = ui.allocate_exact_size(
@@ -858,15 +872,7 @@ impl DawApp {
                                         ),
                                     );
                                     let base = Color32::from_rgb(210, 132, 74);
-                                    let top = Color32::from_rgb(245, 188, 120);
                                     painter.rect_filled(note_rect, 2.0, base);
-                                    painter.line_segment(
-                                        [
-                                            note_rect.left_top() + Vec2::new(0.0, 2.0),
-                                            note_rect.right_top() + Vec2::new(0.0, 2.0),
-                                        ],
-                                        Stroke::new(2.0, top),
-                                    );
                                 }
 
                                 let clip_playhead = self.playhead_beat_display() - clip.start_beat;
