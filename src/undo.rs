@@ -83,7 +83,7 @@ mod tests {
         .unwrap();
         assert_eq!(project.tempo_bpm, 132.0);
         undo.undo(&mut project).unwrap();
-        assert_eq!(project.tempo_bpm, 120.0);
+        assert_eq!(project.tempo_bpm, 112.0);
         undo.redo(&mut project).unwrap();
         assert_eq!(project.tempo_bpm, 132.0);
     }

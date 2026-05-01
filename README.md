@@ -5,8 +5,8 @@
 External agents can control the same DAW over a localhost WebSocket using JSON-RPC 2.0:
 
 ```bash
-cargo run --bin daw
-cargo run --bin daw -- serve 4141
+cargo run
+cargo run -- serve 4141
 ```
 
 Connect to:
