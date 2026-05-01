@@ -8,15 +8,31 @@ use cpal::{
 
 use crate::{
     project::Project,
-    render::{StereoFrame, render_project},
+    render::{StereoFrame, loop_length_frames, mix_stereo_frame},
 };
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct PlaybackState {
-    frames: Vec<StereoFrame>,
-    cursor: usize,
+    source: Option<Arc<Project>>,
+    loop_frames: u64,
+    /// Next stereo frame index to emit (monotonic; wraps modulo `loop_frames` when looping).
+    position: u64,
+    sample_rate: u32,
     playing: bool,
     looping: bool,
+}
+
+impl Default for PlaybackState {
+    fn default() -> Self {
+        Self {
+            source: None,
+            loop_frames: 0,
+            position: 0,
+            sample_rate: crate::render::DEFAULT_SAMPLE_RATE,
+            playing: false,
+            looping: false,
+        }
+    }
 }
 
 pub struct AudioEngine {
@@ -37,6 +53,8 @@ impl Default for AudioEngine {
 
 impl AudioEngine {
     pub fn play(&mut self, project: &Project, looping: bool) -> Result<()> {
+        self.stop();
+
         let host = cpal::default_host();
         let device = host
             .default_output_device()
@@ -44,15 +62,19 @@ impl AudioEngine {
         let supported = device.default_output_config()?;
         let sample_rate = supported.sample_rate();
         let config = supported.config();
-        let frames = render_project(project, sample_rate);
+
+        let source = Arc::new(project.clone());
+        let loop_frames = loop_length_frames(&source, sample_rate);
 
         {
             let mut state = self
                 .state
                 .lock()
                 .map_err(|_| anyhow!("audio state lock poisoned"))?;
-            state.frames = frames;
-            state.cursor = 0;
+            state.source = Some(source);
+            state.loop_frames = loop_frames;
+            state.position = 0;
+            state.sample_rate = sample_rate;
             state.playing = true;
             state.looping = looping;
         }
@@ -79,11 +101,13 @@ impl AudioEngine {
     }
 
     pub fn stop(&mut self) {
+        self.stream = None;
         if let Ok(mut state) = self.state.lock() {
             state.playing = false;
-            state.cursor = 0;
+            state.position = 0;
+            state.source = None;
+            state.loop_frames = 0;
         }
-        self.stream = None;
     }
 
     pub fn is_playing(&self) -> bool {
@@ -97,11 +121,16 @@ impl AudioEngine {
         self.state
             .lock()
             .ok()
-            .and_then(|state| {
-                if state.frames.is_empty() {
-                    None
+            .map(|state| {
+                if state.loop_frames == 0 {
+                    return 0.0;
+                }
+                if state.looping {
+                    (state.position % state.loop_frames) as f32 / state.loop_frames as f32
+                } else if !state.playing && state.position >= state.loop_frames {
+                    1.0
                 } else {
-                    Some(state.cursor as f32 / state.frames.len() as f32)
+                    (state.position.min(state.loop_frames)) as f32 / state.loop_frames as f32
                 }
             })
             .unwrap_or(0.0)
@@ -143,20 +172,28 @@ where
     };
 
     for frame in output.chunks_mut(channels) {
-        let stereo = if state.playing && !state.frames.is_empty() {
-            if state.cursor >= state.frames.len() {
-                if state.looping {
-                    state.cursor = 0;
-                } else {
-                    state.playing = false;
+        let stereo = if state.playing {
+            match &state.source {
+                None => StereoFrame::default(),
+                Some(project) => {
+                    if state.loop_frames == 0 {
+                        state.playing = false;
+                        StereoFrame::default()
+                    } else if state.looping {
+                        let idx = state.position % state.loop_frames;
+                        let stereo = mix_stereo_frame(project, idx, state.sample_rate);
+                        state.position += 1;
+                        stereo
+                    } else if state.position >= state.loop_frames {
+                        state.playing = false;
+                        StereoFrame::default()
+                    } else {
+                        let idx = state.position;
+                        let stereo = mix_stereo_frame(project, idx, state.sample_rate);
+                        state.position += 1;
+                        stereo
+                    }
                 }
-            }
-            if state.playing {
-                let stereo = state.frames[state.cursor];
-                state.cursor += 1;
-                stereo
-            } else {
-                StereoFrame::default()
             }
         } else {
             StereoFrame::default()

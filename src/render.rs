@@ -12,34 +12,43 @@ pub struct StereoFrame {
     pub right: f32,
 }
 
-pub fn render_project(project: &Project, sample_rate: u32) -> Vec<StereoFrame> {
+/// Stereo frame count for one loop iteration (matches `render_project` length).
+pub fn loop_length_frames(project: &Project, sample_rate: u32) -> u64 {
     let seconds_per_beat = 60.0 / project.tempo_bpm.max(1.0);
     let length_seconds = project.loop_length_beats() * seconds_per_beat;
-    let frame_count = (length_seconds * sample_rate as f32).round() as usize;
+    (length_seconds * sample_rate as f32).round() as u64
+}
+
+/// Mix one stereo frame at `sample_index_in_loop` (0 .. `loop_length_frames`).
+pub fn mix_stereo_frame(project: &Project, sample_index_in_loop: u64, sample_rate: u32) -> StereoFrame {
+    let seconds_per_beat = 60.0 / project.tempo_bpm.max(1.0);
+    let time_seconds = sample_index_in_loop as f32 / sample_rate as f32;
+    let beat = project.loop_start_beat() + time_seconds / seconds_per_beat;
     let solo_active = project.tracks.iter().any(|track| track.solo);
-    let mut frames = vec![StereoFrame::default(); frame_count];
+    let mut left = 0.0;
+    let mut right = 0.0;
 
-    for (sample_index, frame) in frames.iter_mut().enumerate() {
-        let time_seconds = sample_index as f32 / sample_rate as f32;
-        let beat = project.loop_start_beat() + time_seconds / seconds_per_beat;
-        let mut left = 0.0;
-        let mut right = 0.0;
-
-        for track in &project.tracks {
-            if !track_should_sound(track, solo_active) {
-                continue;
-            }
-            let sample = render_track(track, beat, seconds_per_beat, sample_rate);
-            let (track_left, track_right) = pan_stereo(sample * track.gain, track.pan);
-            left += track_left;
-            right += track_right;
+    for track in &project.tracks {
+        if !track_should_sound(track, solo_active) {
+            continue;
         }
-
-        frame.left = soft_limit(left * project.master_gain);
-        frame.right = soft_limit(right * project.master_gain);
+        let sample = render_track(track, beat, seconds_per_beat, sample_rate);
+        let (track_left, track_right) = pan_stereo(sample * track.gain, track.pan);
+        left += track_left;
+        right += track_right;
     }
 
-    frames
+    StereoFrame {
+        left: soft_limit(left * project.master_gain),
+        right: soft_limit(right * project.master_gain),
+    }
+}
+
+pub fn render_project(project: &Project, sample_rate: u32) -> Vec<StereoFrame> {
+    let frame_count = loop_length_frames(project, sample_rate) as usize;
+    (0_u64..frame_count as u64)
+        .map(|i| mix_stereo_frame(project, i, sample_rate))
+        .collect()
 }
 
 pub fn export_wav(project: &Project, path: impl AsRef<Path>) -> Result<()> {
@@ -163,6 +172,26 @@ mod tests {
         commands::{DrumStyle, EditCommand, apply_command},
         project::Project,
     };
+
+    #[test]
+    fn render_project_matches_per_frame_mix() {
+        let mut project = Project::default();
+        project.tempo_bpm = 120.0;
+        project.loop_bars = 4;
+        project.tracks = Project::birthday_demo().tracks;
+
+        let sr = 2_000;
+        let frames = render_project(&project, sr);
+        let n = loop_length_frames(&project, sr) as usize;
+        assert_eq!(frames.len(), n);
+        for i in 0..n {
+            assert_eq!(
+                frames[i],
+                mix_stereo_frame(&project, i as u64, sr),
+                "frame {i}"
+            );
+        }
+    }
 
     #[test]
     fn offline_render_has_expected_length() {
