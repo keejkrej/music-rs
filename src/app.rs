@@ -80,29 +80,21 @@ impl DawApp {
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::MenuBar::new().ui(ui, |ui| {
             ui.menu_button("File", |ui| {
-                if ui.button("New Blank").clicked() {
-                    self.new_blank_project();
+                if ui.button("New").clicked() {
+                    self.new_project();
                     ui.close();
                 }
-                if ui.button("Open project.json...").clicked() {
-                    self.open_project_manifest_dialog();
-                    ui.close();
-                }
-                if ui.button("Open Project Folder...").clicked() {
-                    self.open_project_folder_dialog();
+                if ui.button("Open").clicked() {
+                    self.open_project_dialog();
                     ui.close();
                 }
                 ui.separator();
                 if ui.button("Save").clicked() {
-                    self.run_io(|this| this.save_project());
-                    ui.close();
-                }
-                if ui.button("Save Project As (folder)...").clicked() {
-                    self.save_project_as_folder_dialog();
+                    self.save_project_dialog();
                     ui.close();
                 }
                 ui.separator();
-                if ui.button("Export WAV...").clicked() {
+                if ui.button("Export").clicked() {
                     self.export_wav_dialog();
                     ui.close();
                 }
@@ -114,12 +106,6 @@ impl DawApp {
 
             ui.separator();
             ui.label(&self.project.name);
-            if let Some(file_name) = Path::new(&self.project_path)
-                .file_name()
-                .and_then(|name| name.to_str())
-            {
-                ui.label(format!("({file_name})"));
-            }
         });
     }
 
@@ -935,17 +921,17 @@ impl DawApp {
         }
     }
 
-    fn new_blank_project(&mut self) {
+    fn new_project(&mut self) {
         self.audio.stop();
         self.project = Project::blank();
         self.undo.clear();
         self.project_path = default_project_path().display().to_string();
         self.ensure_selection();
         self.transport_playhead_beat = self.project.loop_start_beat();
-        self.status = "New blank project".to_owned();
+        self.status = "New project".to_owned();
     }
 
-    fn open_project_manifest_dialog(&mut self) {
+    fn open_project_dialog(&mut self) {
         let Some(path) = rfd::FileDialog::new()
             .add_filter("Project manifest (project.json)", &["json"])
             .set_directory(default_open_dir())
@@ -964,29 +950,7 @@ impl DawApp {
         self.run_io(|this| this.load_project_from_path(&path));
     }
 
-    fn open_project_folder_dialog(&mut self) {
-        let Some(dir) = rfd::FileDialog::new()
-            .set_directory(default_open_dir())
-            .pick_folder()
-        else {
-            self.status = "Open canceled".to_owned();
-            return;
-        };
-        let manifest = dir.join(project_io::PROJECT_MANIFEST);
-        if !manifest.exists() {
-            self.status = format!(
-                "No {} in that folder",
-                project_io::PROJECT_MANIFEST
-            );
-            return;
-        }
-        self.run_io(|this| {
-            this.project_path = manifest.display().to_string();
-            this.load_project()
-        });
-    }
-
-    fn save_project_as_folder_dialog(&mut self) {
+    fn save_project_dialog(&mut self) {
         let Some(dir) = rfd::FileDialog::new()
             .set_directory(default_open_dir())
             .pick_folder()
